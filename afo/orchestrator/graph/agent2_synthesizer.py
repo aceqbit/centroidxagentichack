@@ -1,5 +1,5 @@
 """
-Agent 2 — Patch Synthesizer (real LLM call)
+Agent 2 — Patch Synthesizer (real Groq LLM call)
 
 Person A imports this at Hour 14 as:
     from graph.agent2_synthesizer import synthesize_policy
@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=_orchestrator_dir / ".env")
 
 from db import repo
+from groq import Groq
 
 
 # ---------------------------------------------------------------------------
@@ -81,17 +82,15 @@ def _build_user_message(findings: list[dict]) -> str:
 
 def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
     """
-    Call LLM (Groq or Anthropic) at temperature=0 to synthesize policy.
-    Supports GROQ_API_KEY (model: llama-3.3-70b-versatile) and ANTHROPIC_API_KEY.
-    Raises RuntimeError if neither key is set.
+    Call Groq LLM (model: llama-3.3-70b-versatile) at temperature=0 to synthesize policy.
+    Raises RuntimeError if GROQ_API_KEY is not set in orchestrator/.env.
     """
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
-    if not groq_key and not anthropic_key:
+    if not groq_key:
         raise RuntimeError(
-            "Neither GROQ_API_KEY nor ANTHROPIC_API_KEY is set in orchestrator/.env.\n"
-            "Add GROQ_API_KEY=gsk_... or ANTHROPIC_API_KEY=sk-ant-... to orchestrator/.env."
+            "GROQ_API_KEY is not set in orchestrator/.env.\n"
+            "Add GROQ_API_KEY=gsk_... to orchestrator/.env."
         )
 
     user_msg = _build_user_message(findings)
@@ -102,53 +101,24 @@ def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
             "no explanation, no text before or after the JSON."
         )
 
-    print(f"[agent2] Sending {len(findings)} finding(s) to LLM...")
-    print("[agent2] PATH: LIVE_LLM_CALL")
+    print(f"[agent2] Sending {len(findings)} finding(s) to Groq LLM...")
+    print("[agent2] PATH: LIVE_LLM_CALL (Groq SDK)")
 
-    if groq_key:
-        import httpx
+    client = Groq(api_key=groq_key)
+    model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    print(f"[agent2] Using Groq API ({model_name})...")
 
-        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        print(f"[agent2] Using Groq API ({model_name})...")
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
 
-        headers = {
-            "Authorization": f"Bearer {groq_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        }
-        resp = httpx.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Groq API error ({resp.status_code}): {resp.text}")
-
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
-    else:
-        import anthropic
-
-        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-        print(f"[agent2] Using Anthropic API ({model_name})...")
-        client = anthropic.Anthropic(api_key=anthropic_key)
-        response = client.messages.create(
-            model=model_name,
-            max_tokens=512,
-            temperature=0,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        raw = response.content[0].text.strip()
-
+    raw = completion.choices[0].message.content.strip()
     print(f"[agent2] Raw LLM response:\n{raw}\n")
 
     # Strip markdown fences if present
@@ -189,7 +159,7 @@ def synthesize_policy(scan_run_id: str) -> dict:
         }
 
     Raises:
-        RuntimeError: if ANTHROPIC_API_KEY is not set in orchestrator/.env.
+        RuntimeError: if GROQ_API_KEY is not set in orchestrator/.env.
     """
     # ── Step 1: Read open findings ─────────────────────────────────────
     all_findings = repo.get_findings(scan_run_id)
@@ -205,11 +175,6 @@ def synthesize_policy(scan_run_id: str) -> dict:
         }
 
     # ── Step 2: LLM call to derive policy fields ───────────────────────
-    # TODO(Hour 6-9): LLM call is wired. Determinism pass at Hour 12.5:
-    #   run 3x and assert identical output. Key params:
-    #   - model="claude-sonnet-4-5", temperature=0, fixed system prompt
-    #   - No randomness in prompt construction (findings sorted by id)
-    #   The LLM reasoning replaces the naive combo_key string-split from skeleton.
     llm_out = _call_llm(sorted(open_findings, key=lambda f: f["id"]))
 
     redact_fields = sorted(set(llm_out.get("redact_fields", [])))

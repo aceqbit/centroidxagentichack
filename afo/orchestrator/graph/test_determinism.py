@@ -1,8 +1,8 @@
 """
-test_determinism.py — Real determinism test against the LIVE LLM path.
+test_determinism.py — Real determinism test against the Groq LLM path.
 
 Calls synthesize_policy() 3 times in a row, captures returned dicts,
-and verifies byte-identical equality across all fields.
+and verifies byte-identical equality across all fields using Groq SDK.
 """
 
 import json
@@ -22,17 +22,14 @@ SCAN_RUN_ID = "00000000-0000-0000-0000-000000000001"
 
 def main():
     print("=" * 60)
-    print("  TEST: Live LLM Determinism (3 consecutive runs)")
+    print("  TEST: Groq LLM Determinism (3 consecutive runs)")
     print("=" * 60)
 
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    print(f"[env check] GROQ_API_KEY present: {bool(groq_key)}")
 
-    print(f"[env check] ANTHROPIC_API_KEY present: {bool(anthropic_key)}")
-    print(f"[env check] GROQ_API_KEY present:      {bool(groq_key)}")
-
-    if not anthropic_key and not groq_key:
-        print("\nTask 3 blocked — need real ANTHROPIC_API_KEY or GROQ_API_KEY in orchestrator/.env.")
+    if not groq_key:
+        print("\nTask 3 blocked — need real GROQ_API_KEY in orchestrator/.env.")
         sys.exit(1)
 
     # 1. Seed database fixture
@@ -75,11 +72,9 @@ def main():
     if run2 != run3:
         diffs.append(f"Run 2 vs Run 3 differ:\nRun 2: {run2}\nRun 3: {run3}")
 
-    llm_path_used = "LIVE_LLM_CALL (Groq)" if groq_key else "LIVE_LLM_CALL (Anthropic)"
-
     if not diffs:
         print(f"PASS — All 3 consecutive runs are byte-identical!")
-        print(f"Path used: {llm_path_used}")
+        print(f"Path used: LIVE_LLM_CALL (Groq SDK llama-3.3-70b-versatile)")
         print(f"Content:\n{json.dumps(run1, indent=2)}")
     else:
         print(f"FAIL — Non-deterministic output detected across runs:")

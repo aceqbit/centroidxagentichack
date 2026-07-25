@@ -5,7 +5,7 @@ Tests:
   1. Stats module verification (DIR + Fisher + BH) - no DB needed
   2. Seed fake data (idempotent)
   3. Agent 2: synthesize_policy
-     - If ANTHROPIC_API_KEY is set: runs real LLM call, tests 3x determinism
+     - If GROQ_API_KEY is set: runs real LLM call, tests 3x determinism
      - If not set: uses SKELETON mode (deterministic hardcoded derivation),
        prints warning, still verifies DB round-trip
   4. Agent 3: verify_fix - prints REAL computed DIR, p-value, adjusted-p
@@ -37,10 +37,7 @@ def _pretty(obj) -> str:
 
 
 def _has_api_key() -> bool:
-    return bool(
-        os.environ.get("GROQ_API_KEY", "").strip()
-        or os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    )
+    return bool(os.environ.get("GROQ_API_KEY", "").strip())
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +46,7 @@ def _has_api_key() -> bool:
 
 def _skeleton_synthesize(scan_run_id: str) -> dict:
     """
-    Deterministic fallback used by smoke test when ANTHROPIC_API_KEY is absent.
+    Deterministic fallback used by smoke test when GROQ_API_KEY is absent.
     Replicates the naive combo_key string-split logic so the DB round-trip
     can still be verified without needing the LLM.
     NOTE: This is NOT the production path — it only runs in smoke_test.py.
@@ -127,13 +124,13 @@ def main() -> None:
     print("\n[2/5] Running Agent 2: synthesize_policy...")
 
     if _has_api_key():
-        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-        print(f"  -> ANTHROPIC_API_KEY found. Using real LLM call ({model_name}).")
+        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        print(f"  -> GROQ_API_KEY found. Using real Groq LLM call ({model_name}).")
         from graph.agent2_synthesizer import synthesize_policy
         use_real_llm = True
     else:
-        print("  -> ANTHROPIC_API_KEY NOT SET. Using deterministic skeleton mode.")
-        print("     (Add key to orchestrator/.env to test real LLM path)")
+        print("  -> GROQ_API_KEY NOT SET. Using deterministic skeleton mode.")
+        print("     (Add GROQ_API_KEY to orchestrator/.env to test real LLM path)")
         synthesize_policy = None
         use_real_llm = False
 
