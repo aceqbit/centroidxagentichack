@@ -23,6 +23,11 @@ on:
       - main
       - feat/agent2-3-policy
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   SCAN_RUN_ID: "00000000-0000-0000-0000-000000000001"
   # GATE_MODE: "pass" (default) or "fail" (test failing case)
@@ -146,6 +151,7 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const rawJson = `${{ steps.gate.outputs.result_json }}`;
             let response;
