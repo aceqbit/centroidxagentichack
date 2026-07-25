@@ -103,6 +103,7 @@ def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
         )
 
     print(f"[agent2] Sending {len(findings)} finding(s) to LLM...")
+    print("[agent2] PATH: LIVE_LLM_CALL")
 
     if groq_key:
         import httpx
