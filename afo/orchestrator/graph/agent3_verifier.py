@@ -61,26 +61,31 @@ def _get_redis():
         return None
 
 
-def _publish_progress(combo_key: str, status: str,
-                      dir_value: float = 0.0, p_value: float = 0.0) -> None:
+def _publish_progress(scan_run_id: str, combo_key: str, status: str,
+                      dir_value: float = 0.0, p_value: float = 0.0,
+                      adj_p_value: float = 0.0) -> None:
     """
     Publish a progress event to Redis channel 'agent3:progress'.
     Wrapped in try/except — Redis hiccup during a demo MUST NOT crash
     verify_fix() or block stats computation.
 
     Channel: exactly "agent3:progress" (Person D's consumer subscribes here).
-    Payload: {"combo": ..., "status": "testing"|"fixed"|"still_failing",
-              "dir_value": ..., "p_value": ..., "ts": <unix timestamp>}
+    Payload: {"scan_run_id": ..., "combo_key": ...,
+              "status": "passed"|"failed",
+              "dir_value": ..., "p_value": ..., "adj_p_value": ...,
+              "ts": <unix timestamp>}
     """
     r = _get_redis()
     if r is None:
         return
 
     payload = json.dumps({
-        "combo": combo_key,
+        "scan_run_id": scan_run_id,
+        "combo_key": combo_key,
         "status": status,
         "dir_value": dir_value,
         "p_value": p_value,
+        "adj_p_value": adj_p_value,
         "ts": time.time(),
     })
     try:
@@ -185,14 +190,9 @@ def verify_fix(scan_run_id: str) -> dict:
         }
 
     # ── Step 3: Simulate post-patch outcome + compute real stats ───────
-    # Publish "testing" event BEFORE running stats for each combo
     raw_results = []
     for f in findings:
         combo_key = f.get("combo_key", "unknown")
-
-        # Emit: "testing" (before stats computation)
-        _publish_progress(combo_key, "testing")
-
         result = _simulate_post_patch_outcome(combo_key)
         raw_results.append(result)
 
@@ -200,7 +200,7 @@ def verify_fix(scan_run_id: str) -> dict:
     raw_p_values = [r["p_value"] for r in raw_results]
     _, adjusted_p_values = correct_pvalues(raw_p_values, alpha=0.05)
 
-    # ── Step 5: Build final results list + emit resolved events ────────
+    # ── Step 5: Build final results list + emit per-combo progress ──────
     results = []
     for r, adj_p in zip(raw_results, adjusted_p_values):
         dir_crossed = bool(r["dir_value"] >= 0.80)
@@ -208,11 +208,15 @@ def verify_fix(scan_run_id: str) -> dict:
         still_significant = bool(adj_p_float < 0.05)
         passed = bool(dir_crossed and not still_significant)
 
-        # Emit: "fixed" or "still_failing" (after stats computation)
-        resolved_status = "fixed" if passed else "still_failing"
+        # Emit per-combo progress IMMEDIATELY after this combo's stats
+        # are computed — live streaming, not batched at the end.
         _publish_progress(
-            r["combo_key"], resolved_status,
-            dir_value=float(r["dir_value"]), p_value=float(r["p_value"]),
+            scan_run_id=scan_run_id,
+            combo_key=r["combo_key"],
+            status="passed" if passed else "failed",
+            dir_value=float(r["dir_value"]),
+            p_value=float(r["p_value"]),
+            adj_p_value=round(adj_p_float, 6),
         )
 
         results.append({
