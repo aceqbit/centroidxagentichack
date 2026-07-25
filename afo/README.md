@@ -42,7 +42,7 @@ uvicorn main:app --port 8000
 
 ## Environment Variables
 
-Copy `target-service/.env` and fill in the real `ANTHROPIC_API_KEY` — **never commit real keys**.
+Copy `orchestrator/.env` and fill in the real `GROQ_API_KEY` — **never commit real keys**.
 
 ## Database Schema
 

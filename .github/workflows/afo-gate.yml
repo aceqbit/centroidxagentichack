@@ -1,0 +1,133 @@
+# AFO CI Gate — Bias Audit Pass/Fail Gate for Pull Requests
+#
+# ARCHITECTURAL NOTE (Gap #11, deliberate decision):
+# This workflow runs compute_ci_gate() DIRECTLY via ci_gate_runner.py,
+# NOT via an HTTP call to the FastAPI endpoint (orchestrator/api.py).
+# Reason: GitHub's hosted runners cannot reach localhost:8100 — there is
+# no public endpoint. The plain HTTP approach (Gap #11) still applies for
+# any environment where the orchestrator API IS reachable (e.g. a deployed
+# staging server or docker-compose integration test). For GitHub Actions,
+# running the logic inline is equivalent and self-contained.
+
+name: AFO Bias Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feat/agent2-3-policy
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  SCAN_RUN_ID: "00000000-0000-0000-0000-000000000001"
+  # GATE_MODE: "pass" (default) or "fail" (test failing case)
+  GATE_MODE: "pass"
+
+jobs:
+  bias-gate:
+    name: Bias Audit Gate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: afo
+          POSTGRES_DB: afo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          cd afo/orchestrator
+          pip install -r requirements.txt
+
+      - name: Seed DB + run CI gate
+        id: gate
+        env:
+          DATABASE_URL: postgresql://postgres:afo@127.0.0.1:5432/afo
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SCAN_RUN_ID: ${{ env.SCAN_RUN_ID }}
+          GATE_MODE: ${{ env.GATE_MODE }}
+        run: |
+          python afo/orchestrator/ci_gate_runner.py
+
+      - name: Evaluate Gate Result
+        if: steps.gate.outputs.passed == 'false'
+        run: |
+          echo "::error::AFO Bias Gate FAILED — one or more combos still show disparate impact below the 0.80 DIR threshold or remain statistically significant after BH-FDR correction."
+          echo ""
+          echo "Full gate result:"
+          echo '${{ steps.gate.outputs.result_json }}' | python3 -m json.tool
+          exit 1
+
+      - name: Post PR Comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          GATE_RESULT: ${{ steps.gate.outputs.result_json }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const rawJson = process.env.GATE_RESULT || '{}';
+            let response;
+            try {
+              response = JSON.parse(rawJson);
+            } catch(e) {
+              console.log("Could not parse gate result JSON:", e);
+              response = { passed: false, summary: { combos: [], error: "Parse error: " + e.message } };
+            }
+            const passed = response.passed;
+            const summary = response.summary || {};
+            const combos = summary.combos || [];
+
+            let body = passed
+              ? '## ✅ AFO Bias Gate — PASSED\n\n'
+              : '## ❌ AFO Bias Gate — FAILED\n\n';
+
+            if (summary.error) {
+              body += `> **Error:** ${summary.error}\n\n`;
+            }
+
+            body += `| Combo | DIR | Adj. p-value | Dir ≥ 0.80? | Still sig? | Status |\n`;
+            body += `|-------|-----|-------------|------------|-----------|--------|\n`;
+
+            for (const c of combos) {
+              const dirOk = c.dir_crossed_threshold ? '✅' : '❌';
+              const sigOk = c.still_significant ? '❌ yes' : '✅ no';
+              const status = c.passed ? '✅ Passed' : '❌ Failed';
+              body += `| \`${c.combo_key}\` | ${c.dir_value} | ${c.adjusted_p} | ${dirOk} | ${sigOk} | ${status} |\n`;
+            }
+
+            body += `\n**Total combos:** ${summary.total_combos || 0}`;
+            body += ` | **Passed:** ${summary.passed_combos || 0}`;
+            body += ` | **Failed:** ${summary.failed_combos || 0}\n`;
+            body += `\n_Policy ID: \`${summary.policy_id || 'N/A'}\`_\n`;
+            body += `\n> Threshold: DIR ≥ 0.80 (four-fifths rule) AND BH-adjusted p ≥ 0.05 (not statistically significant)\n`;
+            body += `> _This gate does not certify absence of bias — only that the four-fifths threshold has been crossed and the result is no longer statistically distinguishable from sampling noise at 95% confidence._`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

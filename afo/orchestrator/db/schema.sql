@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE scan_run (
+CREATE TABLE IF NOT EXISTS scan_run (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   target_name   TEXT NOT NULL,
   started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -8,7 +8,7 @@ CREATE TABLE scan_run (
   status        TEXT NOT NULL DEFAULT 'running'
 );
 
-CREATE TABLE finding (
+CREATE TABLE IF NOT EXISTS finding (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scan_run_id     UUID NOT NULL REFERENCES scan_run(id),
   track           TEXT NOT NULL DEFAULT 'bias',
@@ -20,7 +20,7 @@ CREATE TABLE finding (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE mitigation_policy (
+CREATE TABLE IF NOT EXISTS mitigation_policy (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scan_run_id         UUID NOT NULL REFERENCES scan_run(id),
   is_active           BOOLEAN NOT NULL DEFAULT true,
@@ -31,13 +31,13 @@ CREATE TABLE mitigation_policy (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE mitigation_edges (
+CREATE TABLE IF NOT EXISTS mitigation_edges (
   finding_id  UUID NOT NULL REFERENCES finding(id),
   policy_id   UUID NOT NULL REFERENCES mitigation_policy(id),
   PRIMARY KEY (finding_id, policy_id)
 );
 
-CREATE TABLE ci_gate_result (
+CREATE TABLE IF NOT EXISTS ci_gate_result (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scan_run_id  UUID NOT NULL REFERENCES scan_run(id),
   passed       BOOLEAN NOT NULL,
