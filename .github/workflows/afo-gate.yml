@@ -1,19 +1,13 @@
 # AFO CI Gate — Bias Audit Pass/Fail Gate for Pull Requests
 #
 # ARCHITECTURAL NOTE (Gap #11, deliberate decision):
-# This workflow runs compute_ci_gate() DIRECTLY as an inline Python step,
+# This workflow runs compute_ci_gate() DIRECTLY via ci_gate_runner.py,
 # NOT via an HTTP call to the FastAPI endpoint (orchestrator/api.py).
 # Reason: GitHub's hosted runners cannot reach localhost:8100 — there is
 # no public endpoint. The plain HTTP approach (Gap #11) still applies for
 # any environment where the orchestrator API IS reachable (e.g. a deployed
 # staging server or docker-compose integration test). For GitHub Actions,
 # running the logic inline is equivalent and self-contained.
-#
-# The FastAPI endpoint (orchestrator/api.py → POST /ci-gate/{scan_run_id})
-# exists and is tested locally — it is NOT MCP, deliberately plain HTTP.
-# The same compute_ci_gate() function this workflow calls is what that
-# endpoint wraps. Person A will wrap it again as an MCP tool (run_ci_gate)
-# on feat/mcp-server-wrapper — that is NOT this session's work.
 
 name: AFO Bias Gate
 
@@ -67,76 +61,15 @@ jobs:
           cd afo/orchestrator
           pip install -r requirements.txt
 
-      - name: Seed DB + run CI gate (inline Python)
+      - name: Seed DB + run CI gate
         id: gate
         env:
-          DATABASE_URL: postgresql://postgres:afo@localhost:5432/afo
+          DATABASE_URL: postgresql://postgres:afo@127.0.0.1:5432/afo
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          python3 - <<'PYEOF'
-          import sys, json, os, psycopg2
-          sys.path.insert(0, "afo/orchestrator")
-
-          # 1. Apply DB schema
-          conn = psycopg2.connect(os.environ["DATABASE_URL"])
-          with conn.cursor() as cur:
-              with open("afo/orchestrator/db/schema.sql") as f:
-                  cur.execute(f.read())
-          conn.commit()
-          conn.close()
-          print("[ci-gate] DB schema applied successfully")
-
-          # 2. Seed fixture data
-          from fixtures.seed_fake_data import seed
-          seed()
-
-          # 3. Seed a mitigation_policy linked to both findings
-          from db import repo
-          policy = repo.insert_mitigation_policy(
-              scan_run_id=os.environ["SCAN_RUN_ID"],
-              redact_fields=["applicant_name", "zip_code"],
-              neutral_value="REDACTED",
-              group_adjustments={},
-              rationale="CI gate test policy — fixture data",
-          )
-          print(f"[ci-gate] Seeded policy: {policy['id']}")
-
-          # 4. Determine gate mode
-          gate_mode = os.environ.get("GATE_MODE", "pass")
-
-          if gate_mode == "fail":
-              from graph import agent3_verifier as v
-              from stats.dir import compute_dir
-              from stats.fisher_bh import test_combo
-              original_fn = v._simulate_post_patch_outcome
-              def failing_fixture(combo_key):
-                  a, b, c, d = 27, 23, 50, 0
-                  dir_val = compute_dir(a, 50, c, 50)
-                  odds_ratio, p_value = test_combo(a, b, c, max(d, 1))
-                  return {
-                      "combo_key": combo_key,
-                      "counts": {"unpriv_approved": a, "unpriv_total": 50, "priv_approved": c, "priv_total": 50},
-                      "dir_value": round(dir_val, 4),
-                      "p_value": p_value,
-                      "odds_ratio": odds_ratio,
-                  }
-              v._simulate_post_patch_outcome = failing_fixture
-
-          from gate import compute_ci_gate
-          result = compute_ci_gate(os.environ["SCAN_RUN_ID"])
-
-          result_json = json.dumps(result)
-          print(f"[ci-gate] Result: {result_json}")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"passed={'true' if result['passed'] else 'false'}\n")
-              f.write(f"result_json<<GATE_RESULT_EOF\n{result_json}\nGATE_RESULT_EOF\n")
-
-          sys.exit(0)
-          PYEOF
-        env:
           SCAN_RUN_ID: ${{ env.SCAN_RUN_ID }}
           GATE_MODE: ${{ env.GATE_MODE }}
+        run: |
+          python afo/orchestrator/ci_gate_runner.py
 
       - name: Evaluate Gate Result
         if: steps.gate.outputs.passed == 'false'
