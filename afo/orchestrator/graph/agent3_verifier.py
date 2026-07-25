@@ -1,5 +1,5 @@
 """
-Agent 3 — Regression Verifier (real stats pipeline)
+Agent 3 — Regression Verifier (real stats pipeline + Redis SSE progress)
 
 Person A imports this at Hour 14 as:
     from graph.agent3_verifier import verify_fix
@@ -10,7 +10,10 @@ MCP wrapper: orchestrator/mcp_server.py (Person A, Hour 14).
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+import time
 from pathlib import Path
 
 # Ensure orchestrator/ is on sys.path
@@ -24,6 +27,66 @@ load_dotenv(dotenv_path=_orchestrator_dir / ".env")
 from db import repo
 from stats.dir import compute_dir
 from stats.fisher_bh import test_combo, correct_pvalues
+
+
+# ---------------------------------------------------------------------------
+# Redis pub/sub — lazy, fault-tolerant (Gap #3 emit side)
+# Uses the `redis` library (same as requirements.txt already has).
+# Person D's widget (consume side, Hour 12.5-16) subscribes to this channel.
+# ---------------------------------------------------------------------------
+
+_redis_client = None
+
+
+def _get_redis():
+    """
+    Lazily connect to Redis. Returns None if REDIS_URL is unset or
+    connection fails — callers MUST handle None gracefully.
+    """
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if not redis_url:
+        return None
+
+    try:
+        import redis as redis_lib
+        _redis_client = redis_lib.Redis.from_url(redis_url, decode_responses=True)
+        _redis_client.ping()  # verify connection
+        return _redis_client
+    except Exception as e:
+        print(f"[agent3] WARNING: Redis unavailable ({e}). SSE progress events disabled.")
+        return None
+
+
+def _publish_progress(combo_key: str, status: str,
+                      dir_value: float = 0.0, p_value: float = 0.0) -> None:
+    """
+    Publish a progress event to Redis channel 'agent3:progress'.
+    Wrapped in try/except — Redis hiccup during a demo MUST NOT crash
+    verify_fix() or block stats computation.
+
+    Channel: exactly "agent3:progress" (Person D's consumer subscribes here).
+    Payload: {"combo": ..., "status": "testing"|"fixed"|"still_failing",
+              "dir_value": ..., "p_value": ..., "ts": <unix timestamp>}
+    """
+    r = _get_redis()
+    if r is None:
+        return
+
+    payload = json.dumps({
+        "combo": combo_key,
+        "status": status,
+        "dir_value": dir_value,
+        "p_value": p_value,
+        "ts": time.time(),
+    })
+    try:
+        r.publish("agent3:progress", payload)
+    except Exception as e:
+        print(f"[agent3] WARNING: Redis publish failed for {combo_key}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -51,15 +114,6 @@ def _simulate_post_patch_outcome(combo_key: str) -> dict:
     :3002, re-running only the failing combos with the active policy applied.
     Then feed the real counts into compute_dir() and test_combo() below.
     Check git branch feat/target-agent or main for A's tool availability.
-
-    TODO(Hour 9-12): Publish SSE progress event per combo to Redis pub/sub
-    channel 'agent3:progress' here — Gap #3 responsibility:
-        redis_client.publish('agent3:progress', json.dumps({
-            'combo_key': combo_key,
-            'status': 'verifying',
-            'progress': f'{i}/{total}'
-        }))
-    Don't build it now — just leave this marker so it's a clean plug-in.
     """
     # Fixture counts — clearly marked, not real re-evaluation
     a = _FIXTURE_UNPRIV_APPROVED    # unpriv approved
@@ -85,6 +139,10 @@ def verify_fix(scan_run_id: str) -> dict:
     """
     Agent 3: targeted re-verify of only the previously-failing combos
     after a policy was applied.
+
+    Side-effect: publishes per-combo progress events to Redis channel
+    'agent3:progress' for Person D's live-updating widget. Redis failures
+    are caught and logged but never crash the verification pipeline.
 
     Returns:
         {
@@ -127,29 +185,43 @@ def verify_fix(scan_run_id: str) -> dict:
         }
 
     # ── Step 3: Simulate post-patch outcome + compute real stats ───────
-    raw_results = [_simulate_post_patch_outcome(f.get("combo_key", "unknown"))
-                   for f in findings]
+    # Publish "testing" event BEFORE running stats for each combo
+    raw_results = []
+    for f in findings:
+        combo_key = f.get("combo_key", "unknown")
+
+        # Emit: "testing" (before stats computation)
+        _publish_progress(combo_key, "testing")
+
+        result = _simulate_post_patch_outcome(combo_key)
+        raw_results.append(result)
 
     # ── Step 4: BH-FDR correction across all combos in this verify run ─
     raw_p_values = [r["p_value"] for r in raw_results]
     _, adjusted_p_values = correct_pvalues(raw_p_values, alpha=0.05)
 
-    # ── Step 5: Build final results list ───────────────────────────────
+    # ── Step 5: Build final results list + emit resolved events ────────
     results = []
     for r, adj_p in zip(raw_results, adjusted_p_values):
-        dir_crossed = r["dir_value"] >= 0.80
-        # "passed" = DIR crossed threshold AND NOT still significant after FDR
-        # (i.e. the bias signal is gone statistically)
-        still_significant = adj_p < 0.05
-        passed = dir_crossed and not still_significant
+        dir_crossed = bool(r["dir_value"] >= 0.80)
+        adj_p_float = float(adj_p)
+        still_significant = bool(adj_p_float < 0.05)
+        passed = bool(dir_crossed and not still_significant)
+
+        # Emit: "fixed" or "still_failing" (after stats computation)
+        resolved_status = "fixed" if passed else "still_failing"
+        _publish_progress(
+            r["combo_key"], resolved_status,
+            dir_value=float(r["dir_value"]), p_value=float(r["p_value"]),
+        )
 
         results.append({
-            "combo_key": r["combo_key"],
-            "passed": passed,
-            "dir_value": r["dir_value"],
-            "p_value": r["p_value"],
-            "adjusted_p": round(adj_p, 6),
-            "dir_crossed_threshold": dir_crossed,
+            "combo_key": str(r["combo_key"]),
+            "passed": bool(passed),
+            "dir_value": float(r["dir_value"]),
+            "p_value": float(r["p_value"]),
+            "adjusted_p": round(adj_p_float, 6),
+            "dir_crossed_threshold": bool(dir_crossed),
             "counts": r["counts"],
         })
 
