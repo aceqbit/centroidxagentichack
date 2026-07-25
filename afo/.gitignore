@@ -13,6 +13,8 @@ orchestrator/__pycache__/
 orchestrator/**/__pycache__/
 orchestrator/*.pyc
 orchestrator/**/*.pyc
+*.egg-info/
+tests/__pycache__/
 
 # Python venv
 orchestrator/.venv/
