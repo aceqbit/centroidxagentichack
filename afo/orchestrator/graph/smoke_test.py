@@ -96,12 +96,13 @@ def main() -> None:
     # ── Section 0: Stats module verification (no DB needed) ────────────
     print("\n[0/5] Stats module verification (Fisher + BH + DIR)...")
     from stats.fisher_bh import test_combo, correct_pvalues
-    from stats.dir import compute_dir
+    from stats.dir import compute_dir_from_counts
 
     # Known example: strong bias (10/50 vs 30/50)
     or_val, p_val = test_combo(10, 40, 30, 20)
-    dir_pre = compute_dir(10, 50, 30, 50)
-    dir_post = compute_dir(47, 50, 50, 50)
+    dir_pre = compute_dir_from_counts(10, 50, 30, 50)
+    dir_post = compute_dir_from_counts(47, 50, 50, 50)
+
     _, adj_ps = correct_pvalues([p_val, 0.42, 0.87])
 
     print(f"  Fisher: OR={or_val:.4f}  p={p_val:.6f}  sig={p_val < 0.05}")

@@ -48,3 +48,23 @@ def compute_dir(
     if privileged_approval_rate == 0:
         return float("inf") if unprivileged_approval_rate > 0 else 1.0
     return unprivileged_approval_rate / privileged_approval_rate
+
+
+def compute_dir_from_counts(
+    unpriv_approved: int,
+    unpriv_total: int,
+    priv_approved: int,
+    priv_total: int,
+) -> float:
+    """
+    Compatibility wrapper for callers with raw counts instead of
+    pre-computed rates (e.g. agent3_verifier.py's fixture-based flow).
+    Converts counts to rates, then delegates to compute_dir() — the
+    single source of truth for the DIR formula itself.
+    """
+    if unpriv_total == 0 or priv_total == 0:
+        raise ValueError("total counts must be nonzero")
+    unpriv_rate = unpriv_approved / unpriv_total
+    priv_rate = priv_approved / priv_total
+    return compute_dir(unpriv_rate, priv_rate)
+

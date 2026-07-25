@@ -49,13 +49,14 @@ def run_ci_gate_step():
     if gate_mode == "fail":
         print("[ci-gate-runner] GATE_MODE=fail: Overriding fixture for failing test...")
         from graph import agent3_verifier as v
-        from stats.dir import compute_dir
+        from stats.dir import compute_dir_from_counts
         from stats.fisher_bh import test_combo
-        
+
         def failing_fixture(combo_key):
             a, b, c, d = 27, 23, 50, 0
-            dir_val = compute_dir(a, 50, c, 50)
+            dir_val = compute_dir_from_counts(a, 50, c, 50)
             odds_ratio, p_value = test_combo(a, b, c, max(d, 1))
+
             return {
                 "combo_key": combo_key,
                 "counts": {"unpriv_approved": a, "unpriv_total": 50, "priv_approved": c, "priv_total": 50},

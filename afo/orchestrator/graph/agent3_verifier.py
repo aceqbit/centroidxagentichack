@@ -25,13 +25,14 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=_orchestrator_dir / ".env")
 
 from db import repo
-from stats.dir import compute_dir
+from stats.dir import compute_dir_from_counts
 from stats.fisher_bh import test_combo, correct_pvalues
 from stats.aggregate import compute_aggregate_approval_rate
 from fixtures.fake_findings import (
     FAKE_AGGREGATE_PRE_PATCH,
     FAKE_AGGREGATE_POST_PATCH,
 )
+
 
 
 # ---------------------------------------------------------------------------
@@ -159,8 +160,9 @@ def _simulate_post_patch_outcome(combo_key: str) -> dict:
     d = _FIXTURE_PRIV_TOTAL - c     # priv denied
 
     # Real stats on fixture counts
-    dir_value = compute_dir(a, _FIXTURE_UNPRIV_TOTAL, c, _FIXTURE_PRIV_TOTAL)
+    dir_value = compute_dir_from_counts(a, _FIXTURE_UNPRIV_TOTAL, c, _FIXTURE_PRIV_TOTAL)
     odds_ratio, p_value = test_combo(a, b, c, d)
+
 
     return {
         "combo_key": combo_key,

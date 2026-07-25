@@ -78,3 +78,11 @@ def correct_pvalues(
         return [], []
     reject, adjusted, _, _ = multipletests(raw_pvalues, alpha=alpha, method="fdr_bh")
     return list(reject), list(adjusted)
+
+# Alias for Agent 3 / smoke_test.py compatibility.
+# NOTE: argument order is REVERSED from fisher_test() — test_combo expects
+# (unpriv_approved, unpriv_denied, priv_approved, priv_denied), fisher_test
+# expects (priv_approved, priv_denied, unpriv_approved, unpriv_denied).
+# VERIFIED: test_combo(a,b,c,d) maps unpriv to row 1, priv to row 0 in fisher_test; p-value is identical for two-sided test.
+def test_combo(unpriv_approved, unpriv_denied, priv_approved, priv_denied):
+    return fisher_test(priv_approved, priv_denied, unpriv_approved, unpriv_denied)
