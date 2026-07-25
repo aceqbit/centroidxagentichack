@@ -38,7 +38,22 @@ Redacting a field removes the direct signal but does not automatically eliminate
 
 ## Q6: "How do you check the patch didn't just trade one bias for another — do you check the aggregate decision rate, not just the flagged combo's DIR?"
 
-Currently Agent 3 re-verifies specifically the combos that were flagged by the previous scan and linked via `mitigation_edges` to the active policy — it does not sweep the full combination lattice again after patching. This is an honest limitation: to catch a patch that trades one bias for another, you need to re-run Agent 1's full scan post-patch. The CI gate (`compute_ci_gate()`) calls `verify_fix()` which only checks previously-flagged combos; it would need to be extended to invoke Agent 1 again for a full post-patch sweep to catch new regressions. This is explicitly called out in the build plan as a Phase 2 improvement. The aggregate decision rate and across-group parity are not currently computed — `[TBD — confirm before demo whether a full post-patch re-scan is in scope]`.
+As of this session, Agent 3's `verify_fix()` now performs **both** checks:
+
+1. **Per-combo DIR + Fisher/BH check** (pre-existing): re-verifies each originally-flagged combo. Post-patch DIR=0.94 (above 0.80 threshold), BH-adjusted p=0.242 (not significant at alpha=0.05) — both combos pass `[VERIFIED — smoke_test.py, test_aggregate_check.py]`.
+
+2. **Aggregate approval-rate delta check** (NEW — `stats/aggregate.py`): computes overall approval rate before and after the patch across all applicants and flags a WARNING if the absolute delta exceeds 5 percentage points.
+
+**Live test output (`test_aggregate_check.py`, this session):**
+- Pre-patch rate: `0.6800` (340/500 applicants approved — 68.00%)
+- Post-patch rate: `0.6700` (335/500 applicants approved — 67.00%)
+- Delta: `0.0100` (1.00 percentage point)
+- Threshold: `0.05` (5.00 percentage points — judgment call, not a regulatory number)
+- `flagged = False` — delta of 1.00 pp is comfortably within the 5 pp warning threshold; aggregate calibration is stable.
+
+The result is returned under `result["aggregate_check"]` in `verify_fix()`'s dict and also published as a `"type": "aggregate_summary"` Redis SSE message `[VERIFIED — test_sse_emission.py, this session]`.
+
+**Remaining caveat:** The aggregate baseline (`approved=340, total=500` pre-patch; `approved=335, total=500` post-patch) is still **fixture data** from `fixtures/fake_findings.py`, not real counts from target-service's applicant pool. A comment `# TODO(Hour 9-12 target-service integration)` marks the exact line in `agent3_verifier.py` where real counts must be substituted after integration. The 5 pp threshold is also a judgment call documented as such in `stats/aggregate.py`, not derived from a regulatory standard.
 
 ---
 
