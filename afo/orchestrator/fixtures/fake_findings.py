@@ -29,3 +29,17 @@ FAKE_FINDINGS = [
         "status": "open",
     },
 ]
+
+# ---------------------------------------------------------------------------
+# Aggregate approval counts — baseline for aggregate decision rate check.
+# Pre-patch:  340 out of 500 applicants approved (68.0%).
+# Post-patch: 335 out of 500 applicants approved (67.0%).
+# Delta = |0.670 - 0.680| = 0.010 (1 percentage point) — below the 0.05
+# warning threshold, so flagged=False in compute_aggregate_approval_rate().
+#
+# TODO(Hour 9-12 target-service integration): replace these fixture counts
+# with real aggregate approval counts queried from target-service's full
+# applicant pool, once that integration exists.
+# ---------------------------------------------------------------------------
+FAKE_AGGREGATE_PRE_PATCH  = {"approved": 340, "total": 500}
+FAKE_AGGREGATE_POST_PATCH = {"approved": 335, "total": 500}

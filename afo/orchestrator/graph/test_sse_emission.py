@@ -161,19 +161,56 @@ def main():
     print("-" * 60)
 
     # 6. Assertions
-    assert len(received) == len(EXPECTED_COMBOS), f"Expected {len(EXPECTED_COMBOS)} messages, got {len(received)}"
-    received_combos = {m["combo_key"] for m in received}
-    assert received_combos == EXPECTED_COMBOS, f"Combo keys mismatch: {received_combos} vs {EXPECTED_COMBOS}"
-    
-    for msg in received:
-        assert msg["scan_run_id"] == SCAN_RUN_ID
-        assert msg["status"] in ("passed", "failed")
-        assert "dir_value" in msg
-        assert "p_value" in msg
-        assert "adj_p_value" in msg
-        assert "ts" in msg
+    EXPECTED_COMBO_COUNT = len(EXPECTED_COMBOS)   # 2 combo_result messages
+    EXPECTED_TOTAL_MSGS  = EXPECTED_COMBO_COUNT + 1  # + 1 aggregate_summary
 
-    print("\n[SUCCESS] TASK 1 — All SSE progress emission assertions PASSED!")
+    assert len(received) == EXPECTED_TOTAL_MSGS, (
+        f"Expected {EXPECTED_TOTAL_MSGS} messages (2 combo_result + 1 aggregate_summary), "
+        f"got {len(received)}"
+    )
+    print(f"[PASS] Received exactly {EXPECTED_TOTAL_MSGS} SSE messages")
+
+    # Split messages by type
+    combo_msgs     = [m for m in received if m.get("type") == "combo_result"]
+    agg_msgs       = [m for m in received if m.get("type") == "aggregate_summary"]
+    unknown_msgs   = [m for m in received if m.get("type") not in ("combo_result", "aggregate_summary")]
+
+    assert len(combo_msgs)   == 2, f"Expected 2 combo_result messages, got {len(combo_msgs)}"
+    assert len(agg_msgs)     == 1, f"Expected 1 aggregate_summary message, got {len(agg_msgs)}"
+    assert len(unknown_msgs) == 0, f"Unexpected message types: {unknown_msgs}"
+    print(f"[PASS] 2 combo_result + 1 aggregate_summary — message types correct")
+
+    # Combo_result assertions (same fields as before, plus 'type')
+    received_combos = {m["combo_key"] for m in combo_msgs}
+    assert received_combos == EXPECTED_COMBOS, (
+        f"Combo keys mismatch: {received_combos} vs {EXPECTED_COMBOS}"
+    )
+    print(f"[PASS] combo_result combo_keys: {received_combos}")
+
+    for msg in combo_msgs:
+        assert msg["type"]        == "combo_result"
+        assert msg["scan_run_id"] == SCAN_RUN_ID
+        assert msg["status"]      in ("passed", "failed")
+        assert "dir_value"   in msg
+        assert "p_value"     in msg
+        assert "adj_p_value" in msg
+        assert "ts"          in msg
+    print("[PASS] All combo_result messages have correct fields")
+
+    # Aggregate_summary assertions
+    agg = agg_msgs[0]
+    assert agg["type"]           == "aggregate_summary"
+    assert agg["scan_run_id"]    == SCAN_RUN_ID
+    assert "pre_patch_rate"       in agg
+    assert "post_patch_rate"      in agg
+    assert "delta"                in agg
+    assert "flagged"              in agg
+    assert isinstance(agg["flagged"], bool)
+    print(f"[PASS] aggregate_summary: pre={agg['pre_patch_rate']} "
+          f"post={agg['post_patch_rate']} delta={agg['delta']} flagged={agg['flagged']}")
+
+    print("\n[SUCCESS] TASK 1 — All SSE progress emission assertions PASSED "
+          "(3 messages: 2 combo_result + 1 aggregate_summary)!")
 
 
 if __name__ == "__main__":

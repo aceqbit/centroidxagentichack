@@ -27,6 +27,11 @@ load_dotenv(dotenv_path=_orchestrator_dir / ".env")
 from db import repo
 from stats.dir import compute_dir
 from stats.fisher_bh import test_combo, correct_pvalues
+from stats.aggregate import compute_aggregate_approval_rate
+from fixtures.fake_findings import (
+    FAKE_AGGREGATE_PRE_PATCH,
+    FAKE_AGGREGATE_POST_PATCH,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +70,13 @@ def _publish_progress(scan_run_id: str, combo_key: str, status: str,
                       dir_value: float = 0.0, p_value: float = 0.0,
                       adj_p_value: float = 0.0) -> None:
     """
-    Publish a progress event to Redis channel 'agent3:progress'.
+    Publish a per-combo progress event to Redis channel 'agent3:progress'.
     Wrapped in try/except — Redis hiccup during a demo MUST NOT crash
     verify_fix() or block stats computation.
 
     Channel: exactly "agent3:progress" (Person D's consumer subscribes here).
-    Payload: {"scan_run_id": ..., "combo_key": ...,
+    Payload: {"type": "combo_result",  # NEW (backward-compatible)
+              "scan_run_id": ..., "combo_key": ...,
               "status": "passed"|"failed",
               "dir_value": ..., "p_value": ..., "adj_p_value": ...,
               "ts": <unix timestamp>}
@@ -80,6 +86,7 @@ def _publish_progress(scan_run_id: str, combo_key: str, status: str,
         return
 
     payload = json.dumps({
+        "type": "combo_result",          # added so D's widget can distinguish message types
         "scan_run_id": scan_run_id,
         "combo_key": combo_key,
         "status": status,
@@ -92,6 +99,31 @@ def _publish_progress(scan_run_id: str, combo_key: str, status: str,
         r.publish("agent3:progress", payload)
     except Exception as e:
         print(f"[agent3] WARNING: Redis publish failed for {combo_key}: {e}")
+
+
+def _publish_aggregate_summary(scan_run_id: str, agg: dict) -> None:
+    """
+    Publish ONE aggregate_summary event after the per-combo loop completes.
+    Payload: {"type": "aggregate_summary", "scan_run_id": ...,
+              "pre_patch_rate": ..., "post_patch_rate": ...,
+              "delta": ..., "flagged": bool}
+    """
+    r = _get_redis()
+    if r is None:
+        return
+
+    payload = json.dumps({
+        "type": "aggregate_summary",
+        "scan_run_id": scan_run_id,
+        "pre_patch_rate": agg["pre_patch_rate"],
+        "post_patch_rate": agg["post_patch_rate"],
+        "delta": agg["delta"],
+        "flagged": agg["flagged"],
+    })
+    try:
+        r.publish("agent3:progress", payload)
+    except Exception as e:
+        print(f"[agent3] WARNING: Redis publish failed for aggregate_summary: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +261,26 @@ def verify_fix(scan_run_id: str) -> dict:
             "counts": r["counts"],
         })
 
+    # ── Step 6: Aggregate decision rate check ─────────────────────────
+    # TODO(Hour 9-12 target-service integration): replace fixture aggregate
+    # counts with real aggregate approval counts queried from target-service's
+    # full applicant pool, once that integration exists.
+    agg_check = compute_aggregate_approval_rate(
+        pre_patch=FAKE_AGGREGATE_PRE_PATCH,
+        post_patch=FAKE_AGGREGATE_POST_PATCH,
+    )
+    print(f"[agent3] Aggregate check: pre={agg_check['pre_patch_rate']:.4f}"
+          f" post={agg_check['post_patch_rate']:.4f}"
+          f" delta={agg_check['delta']:.4f}"
+          f" flagged={agg_check['flagged']}")
+
+    # ── Step 7: Publish aggregate_summary SSE after the combo loop ─────
+    _publish_aggregate_summary(scan_run_id=scan_run_id, agg=agg_check)
+
     return {
         "scan_run_id": scan_run_id,
         "policy_id": policy_id,
         "results": results,
+        # NEW key only — existing keys above are unchanged.
+        "aggregate_check": agg_check,
     }
