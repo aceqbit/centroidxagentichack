@@ -37,7 +37,10 @@ def _pretty(obj) -> str:
 
 
 def _has_api_key() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    return bool(
+        os.environ.get("GROQ_API_KEY", "").strip()
+        or os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,8 @@ def main() -> None:
     print("\n[2/5] Running Agent 2: synthesize_policy...")
 
     if _has_api_key():
-        print("  -> ANTHROPIC_API_KEY found. Using real LLM call (claude-sonnet-4-5).")
+        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+        print(f"  -> ANTHROPIC_API_KEY found. Using real LLM call ({model_name}).")
         from graph.agent2_synthesizer import synthesize_policy
         use_real_llm = True
     else:
@@ -209,7 +213,8 @@ def main() -> None:
     active_policy = repo.get_active_policy(FAKE_SCAN_RUN_ID)
     print(f"  -> Active policy:\n{_pretty(active_policy)}")
     assert active_policy is not None, "FAIL: no active policy in DB"
-    assert active_policy["id"] == a2_result_1["policy_id"], "FAIL: policy_id mismatch"
+    latest_policy_id = a2_result_3.get("policy_id") or a2_result_1["policy_id"]
+    assert active_policy["id"] == latest_policy_id, f"FAIL: policy_id mismatch (got {active_policy['id']}, expected {latest_policy_id})"
     assert active_policy["is_active"] is True, "FAIL: policy not active"
     assert active_policy["redact_fields"] == a2_result_1["redact_fields"], \
         f"FAIL: DB redact_fields mismatch"

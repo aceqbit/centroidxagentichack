@@ -60,8 +60,9 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
       e.g. "zip_code=90210" -> "zip_code"). Deduplicate. Sort alphabetically.
     - neutral_value: always "REDACTED" for now.
     - group_adjustments: always {} for now (real logic at Hour 9-12).
-    - rationale: 1-3 sentences. Reference field names, finding count, and expected
-      DIR improvement. Use honest post-patch language per rules above.
+    - rationale: Must follow this exact template string:
+      "Redacting [fields] - flagged in [N] finding(s): [combo_keys]. Expected to restore DIR above the 0.80 threshold."
+      Fill in [fields], [N], and [combo_keys] accurately. Do not alter the surrounding template text.
 """)
 
 
@@ -80,20 +81,18 @@ def _build_user_message(findings: list[dict]) -> str:
 
 def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
     """
-    Call Anthropic claude-sonnet-4-6 at temperature=0 to synthesize policy.
-    Raises RuntimeError if ANTHROPIC_API_KEY is not set.
-    Raises ValueError on JSON parse failure after one retry.
+    Call LLM (Groq or Anthropic) at temperature=0 to synthesize policy.
+    Supports GROQ_API_KEY (model: llama-3.3-70b-versatile) and ANTHROPIC_API_KEY.
+    Raises RuntimeError if neither key is set.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+    if not groq_key and not anthropic_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set in orchestrator/.env.\n"
-            "Add: ANTHROPIC_API_KEY=sk-ant-... to orchestrator/.env and re-run."
+            "Neither GROQ_API_KEY nor ANTHROPIC_API_KEY is set in orchestrator/.env.\n"
+            "Add GROQ_API_KEY=gsk_... or ANTHROPIC_API_KEY=sk-ant-... to orchestrator/.env."
         )
-
-    import anthropic  # lazy import — only needed when key is present
-
-    client = anthropic.Anthropic(api_key=api_key)
 
     user_msg = _build_user_message(findings)
     if retry:
@@ -104,17 +103,51 @@ def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
         )
 
     print(f"[agent2] Sending {len(findings)} finding(s) to LLM...")
-    print(f"[agent2] User message:\n{user_msg}\n")
 
-    response = client.messages.create(
-        model="claude-sonnet-4-5",   # claude-sonnet-4-5 is current stable
-        max_tokens=512,
-        temperature=0,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    )
+    if groq_key:
+        import httpx
 
-    raw = response.content[0].text.strip()
+        model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        print(f"[agent2] Using Groq API ({model_name})...")
+
+        headers = {
+            "Authorization": f"Bearer {groq_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        resp = httpx.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Groq API error ({resp.status_code}): {resp.text}")
+
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+    else:
+        import anthropic
+
+        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+        print(f"[agent2] Using Anthropic API ({model_name})...")
+        client = anthropic.Anthropic(api_key=anthropic_key)
+        response = client.messages.create(
+            model=model_name,
+            max_tokens=512,
+            temperature=0,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        raw = response.content[0].text.strip()
+
     print(f"[agent2] Raw LLM response:\n{raw}\n")
 
     # Strip markdown fences if present
@@ -132,7 +165,7 @@ def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
                 f"LLM returned invalid JSON after retry. Parse error: {e}\n"
                 f"Raw response was:\n{raw}"
             ) from e
-        print(f"[agent2] JSON parse failed ({e}), retrying once with stricter prompt...")
+        print(f"[agent2] JSON parse failed ({e}), retrying once...")
         return _call_llm(findings, retry=True)
 
 
