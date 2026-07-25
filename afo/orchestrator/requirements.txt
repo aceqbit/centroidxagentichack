@@ -12,3 +12,4 @@ python-dotenv
 httpx
 pytest
 pandas
+typing_extensions
