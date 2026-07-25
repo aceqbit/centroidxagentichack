@@ -62,29 +62,30 @@ jobs:
           cd afo/orchestrator
           pip install -r requirements.txt
 
-      - name: Apply DB schema
-        run: |
-          PGPASSWORD=afo psql -h localhost -U postgres -d afo -f afo/orchestrator/db/schema.sql
-
-      - name: Seed fixture + run CI gate (inline Python, no HTTP)
+      - name: Seed DB + run CI gate (inline Python)
         id: gate
         env:
           DATABASE_URL: postgresql://postgres:afo@localhost:5432/afo
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           python3 - <<'PYEOF'
-          import sys, json, os
+          import sys, json, os, psycopg2
           sys.path.insert(0, "afo/orchestrator")
 
-          from dotenv import load_dotenv
-          # No .env file on runner — env vars already set in env: block above
+          # 1. Apply DB schema
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              with open("afo/orchestrator/db/schema.sql") as f:
+                  cur.execute(f.read())
+          conn.commit()
+          conn.close()
+          print("[ci-gate] DB schema applied successfully")
 
-          # Seed fixture data
+          # 2. Seed fixture data
           from fixtures.seed_fake_data import seed
           seed()
 
-          # Seed a mitigation_policy linked to both findings
-          # (required for compute_ci_gate → verify_fix to find active policy)
+          # 3. Seed a mitigation_policy linked to both findings
           from db import repo
           policy = repo.insert_mitigation_policy(
               scan_run_id=os.environ["SCAN_RUN_ID"],
@@ -95,21 +96,17 @@ jobs:
           )
           print(f"[ci-gate] Seeded policy: {policy['id']}")
 
-          # Determine gate mode
+          # 4. Determine gate mode
           gate_mode = os.environ.get("GATE_MODE", "pass")
 
           if gate_mode == "fail":
-              # Override fixture to simulate a FAILING case:
-              # DIR=0.55 (below 0.80) and still statistically significant
               from graph import agent3_verifier as v
+              from stats.dir import compute_dir
+              from stats.fisher_bh import test_combo
               original_fn = v._simulate_post_patch_outcome
               def failing_fixture(combo_key):
-                  from stats.dir import compute_dir
-                  from stats.fisher_bh import test_combo
-                  # unpriv: 27/50 approved, priv: 50/50 — DIR = 0.54
                   a, b, c, d = 27, 23, 50, 0
                   dir_val = compute_dir(a, 50, c, 50)
-                  # Fisher with d=0 — add 0.5 continuity correction
                   odds_ratio, p_value = test_combo(a, b, c, max(d, 1))
                   return {
                       "combo_key": combo_key,
@@ -126,9 +123,7 @@ jobs:
           result_json = json.dumps(result)
           print(f"[ci-gate] Result: {result_json}")
 
-          # Write output for next steps
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              # Escape for multiline GITHUB_OUTPUT
               f.write(f"passed={'true' if result['passed'] else 'false'}\n")
               f.write(f"result_json<<GATE_RESULT_EOF\n{result_json}\nGATE_RESULT_EOF\n")
 
