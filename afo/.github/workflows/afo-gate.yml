@@ -1,0 +1,93 @@
+# AFO CI Gate — Bias Audit Pass/Fail Gate for Pull Requests
+#
+# Deliberately plain HTTP, not MCP — see build plan Section 6.6 closing
+# note / Gap #11. Same logic is also exposed as the run_ci_gate MCP tool
+# for humans, built separately by Person A on feat/mcp-server-wrapper.
+#
+# This workflow:
+#   1. Calls POST /ci-gate/{scan_run_id} on the orchestrator API
+#   2. Parses the JSON response
+#   3. Fails the job (exit 1) if `passed` is false
+#   4. Posts a PR comment summarizing the gate result
+#
+# NOTE: Full live-testing against a real PR (confirming the Action actually
+# fails visibly, screenshot/recording as backup) is scheduled for Hour 14-17.
+# The scan_run_id is a fixed test value for now — we don't have a real
+# PR-triggered scan pipeline yet.
+
+name: AFO Bias Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  # Fixed test scan_run_id for now (matches fixtures/fake_findings.py)
+  # Replace with a dynamic value once the full scan pipeline is wired
+  SCAN_RUN_ID: "00000000-0000-0000-0000-000000000001"
+  # Orchestrator API endpoint — assumes it's running on the same runner
+  # or a known host. Update for your deployment.
+  API_BASE_URL: "http://localhost:8100"
+
+jobs:
+  bias-gate:
+    name: Bias Audit Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Call CI Gate Endpoint
+        id: gate
+        run: |
+          RESPONSE=$(curl -s -X POST "${{ env.API_BASE_URL }}/ci-gate/${{ env.SCAN_RUN_ID }}")
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          echo "Gate response: $RESPONSE"
+
+          # Extract passed field
+          PASSED=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('passed', False))")
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+
+      - name: Evaluate Gate Result
+        if: steps.gate.outputs.passed == 'False'
+        run: |
+          echo "::error::AFO Bias Gate FAILED — one or more combos still show disparate impact below the 0.80 DIR threshold or remain statistically significant after BH-FDR correction."
+          echo ""
+          echo "Gate response:"
+          echo '${{ steps.gate.outputs.response }}' | python3 -m json.tool
+          exit 1
+
+      - name: Post PR Comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = JSON.parse(`${{ steps.gate.outputs.response }}`);
+            const passed = response.passed;
+            const summary = response.summary || {};
+            const combos = summary.combos || [];
+
+            let body = passed
+              ? '## :white_check_mark: AFO Bias Gate — PASSED\n\n'
+              : '## :x: AFO Bias Gate — FAILED\n\n';
+
+            body += `| Combo | DIR | Adj. p-value | Status |\n`;
+            body += `|-------|-----|-------------|--------|\n`;
+
+            for (const c of combos) {
+              const status = c.passed ? ':white_check_mark: Passed' : ':x: Failed';
+              body += `| ${c.combo_key} | ${c.dir_value} | ${c.adjusted_p} | ${status} |\n`;
+            }
+
+            body += `\n**Total combos:** ${summary.total_combos || 0}`;
+            body += ` | **Passed:** ${summary.passed_combos || 0}`;
+            body += ` | **Failed:** ${summary.failed_combos || 0}\n`;
+            body += `\n_Policy ID: ${summary.policy_id || 'N/A'}_`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
