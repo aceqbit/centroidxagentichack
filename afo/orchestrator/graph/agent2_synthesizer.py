@@ -1,19 +1,19 @@
 """
-Agent 2 — Patch Synthesizer (skeleton)
-
-Turns open findings for a scan_run_id into a mitigation_policy and
-writes it live to Postgres.
+Agent 2 — Patch Synthesizer (real LLM call)
 
 Person A imports this at Hour 14 as:
     from graph.agent2_synthesizer import synthesize_policy
 
-DO NOT add MCP decorators here — this is internal logic only.
-The MCP wrapper lives in orchestrator/mcp_server.py (Person A, Hour 14).
+DO NOT add MCP decorators here — internal logic only.
+MCP wrapper: orchestrator/mcp_server.py (Person A, Hour 14).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+import textwrap
 from pathlib import Path
 
 # Ensure orchestrator/ is on sys.path
@@ -21,8 +21,124 @@ _orchestrator_dir = Path(__file__).resolve().parent.parent
 if str(_orchestrator_dir) not in sys.path:
     sys.path.insert(0, str(_orchestrator_dir))
 
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=_orchestrator_dir / ".env")
+
 from db import repo
 
+
+# ---------------------------------------------------------------------------
+# LLM helpers
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT = textwrap.dedent("""\
+    You are a bias-mitigation policy synthesizer for an automated fairness auditing system.
+
+    You will be given a list of bias findings — each contains a combo_key (a proxy
+    field and value that showed disparate impact), statistical measures, and context.
+
+    Your job: derive a mitigation policy in JSON. Be precise and honest.
+
+    LANGUAGE RULES (mandatory):
+    - Never say "0% bias", "fully compliant", "bias-free", or "guaranteed fair".
+    - Use language like: "DIR restored above the four-fifths threshold (0.80)",
+      "no longer statistically distinguishable from sampling noise at alpha=0.05",
+      "redacting these fields is expected to reduce proxy-based disparate impact".
+    - Rationale must be factual and calibrated — this output may appear in a
+      compliance report reviewed by humans.
+
+    OUTPUT FORMAT: Return ONLY a valid JSON object. No prose, no markdown fences.
+    Schema:
+    {
+      "redact_fields": ["field1", "field2", ...],
+      "neutral_value": "REDACTED",
+      "group_adjustments": {},
+      "rationale": "..."
+    }
+
+    - redact_fields: list of proxy field names implicated (extract from combo_key,
+      e.g. "zip_code=90210" -> "zip_code"). Deduplicate. Sort alphabetically.
+    - neutral_value: always "REDACTED" for now.
+    - group_adjustments: always {} for now (real logic at Hour 9-12).
+    - rationale: 1-3 sentences. Reference field names, finding count, and expected
+      DIR improvement. Use honest post-patch language per rules above.
+""")
+
+
+def _build_user_message(findings: list[dict]) -> str:
+    lines = [f"Open findings to address ({len(findings)} total):"]
+    for f in findings:
+        lines.append(
+            f"  - combo_key={f.get('combo_key')!r}  "
+            f"dir_value={f.get('dir_value')}  "
+            f"p_value={f.get('p_value')}  "
+            f"fdr_adjusted_p={f.get('fdr_adjusted_p')}"
+        )
+    lines.append("\nReturn ONLY the JSON object. No other text.")
+    return "\n".join(lines)
+
+
+def _call_llm(findings: list[dict], *, retry: bool = False) -> dict:
+    """
+    Call Anthropic claude-sonnet-4-6 at temperature=0 to synthesize policy.
+    Raises RuntimeError if ANTHROPIC_API_KEY is not set.
+    Raises ValueError on JSON parse failure after one retry.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set in orchestrator/.env.\n"
+            "Add: ANTHROPIC_API_KEY=sk-ant-... to orchestrator/.env and re-run."
+        )
+
+    import anthropic  # lazy import — only needed when key is present
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    user_msg = _build_user_message(findings)
+    if retry:
+        user_msg += (
+            "\n\nCRITICAL: Your previous response was not valid JSON. "
+            "Return ONLY a valid JSON object. Absolutely no markdown, "
+            "no explanation, no text before or after the JSON."
+        )
+
+    print(f"[agent2] Sending {len(findings)} finding(s) to LLM...")
+    print(f"[agent2] User message:\n{user_msg}\n")
+
+    response = client.messages.create(
+        model="claude-sonnet-4-5",   # claude-sonnet-4-5 is current stable
+        max_tokens=512,
+        temperature=0,
+        system=_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+
+    raw = response.content[0].text.strip()
+    print(f"[agent2] Raw LLM response:\n{raw}\n")
+
+    # Strip markdown fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        if retry:
+            raise ValueError(
+                f"LLM returned invalid JSON after retry. Parse error: {e}\n"
+                f"Raw response was:\n{raw}"
+            ) from e
+        print(f"[agent2] JSON parse failed ({e}), retrying once with stricter prompt...")
+        return _call_llm(findings, retry=True)
+
+
+# ---------------------------------------------------------------------------
+# Public API — signature locked for Person A's Hour 14 mcp_server.py import
+# ---------------------------------------------------------------------------
 
 def synthesize_policy(scan_run_id: str) -> dict:
     """
@@ -35,8 +151,11 @@ def synthesize_policy(scan_run_id: str) -> dict:
             "redact_fields": list[str],
             "group_adjustments": dict,
             "rationale": str,
-            "findings_addressed": list[str]  # finding IDs
+            "findings_addressed": list[str]
         }
+
+    Raises:
+        RuntimeError: if ANTHROPIC_API_KEY is not set in orchestrator/.env.
     """
     # ── Step 1: Read open findings ─────────────────────────────────────
     all_findings = repo.get_findings(scan_run_id)
@@ -51,30 +170,18 @@ def synthesize_policy(scan_run_id: str) -> dict:
             "findings_addressed": [],
         }
 
-    # ── Step 2: Derive redact_fields from combo_keys ───────────────────
-    # TODO(Hour 6-9): replace hardcoded derivation with real LLM call,
-    #   temp=0, fixed seed, per build plan Section 5.3/6.6.2.
-    #   The LLM should receive the list of open findings and generate:
-    #     - redact_fields (which fields to redact)
-    #     - neutral_value (what to replace with)
-    #     - group_adjustments (per-group score adjustments)
-    #     - rationale (human-readable explanation)
-    #   For now, we derive these deterministically from combo_keys.
-    redact_fields = sorted(set(
-        f["combo_key"].split("=")[0]
-        for f in open_findings
-        if f.get("combo_key") and "=" in f["combo_key"]
-    ))
+    # ── Step 2: LLM call to derive policy fields ───────────────────────
+    # TODO(Hour 6-9): LLM call is wired. Determinism pass at Hour 12.5:
+    #   run 3x and assert identical output. Key params:
+    #   - model="claude-sonnet-4-5", temperature=0, fixed system prompt
+    #   - No randomness in prompt construction (findings sorted by id)
+    #   The LLM reasoning replaces the naive combo_key string-split from skeleton.
+    llm_out = _call_llm(sorted(open_findings, key=lambda f: f["id"]))
 
-    # Hardcoded skeleton values — replaced by LLM output at Hour 6-9
-    neutral_value = "REDACTED"
-    group_adjustments: dict = {}
-
-    combo_keys = [f["combo_key"] for f in open_findings]
-    rationale = (
-        f"Redacting {redact_fields} — flagged in {len(open_findings)} "
-        f"finding(s): {combo_keys}"
-    )
+    redact_fields = sorted(set(llm_out.get("redact_fields", [])))
+    neutral_value = llm_out.get("neutral_value", "REDACTED")
+    group_adjustments = llm_out.get("group_adjustments", {})
+    rationale = llm_out.get("rationale", "")
 
     # ── Step 3: Write policy to Postgres ───────────────────────────────
     policy = repo.insert_mitigation_policy(
