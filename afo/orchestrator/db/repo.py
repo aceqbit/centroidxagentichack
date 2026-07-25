@@ -255,3 +255,30 @@ def get_findings_for_policy(policy_id: str) -> list[dict]:
             return _rows_to_dicts(cur)
     finally:
         _put_conn(conn)
+
+
+def insert_ci_gate_result(scan_run_id: str, passed: bool, summary: dict) -> dict:
+    """
+    Insert a ci_gate_result row recording a CI gate pass/fail decision.
+    Returns the inserted row as a dict.
+    """
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ci_gate_result (scan_run_id, passed, summary)
+                VALUES (%s, %s, %s)
+                RETURNING *
+                """,
+                (scan_run_id, passed, json.dumps(summary)),
+            )
+            row = _rows_to_dicts(cur)
+            conn.commit()
+            return row[0]
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _put_conn(conn)
+
