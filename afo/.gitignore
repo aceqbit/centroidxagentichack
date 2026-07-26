@@ -26,3 +26,6 @@ Thumbs.db
 # Editor
 .vscode/settings.json
 .idea/
+node_modules/
+.output/
+.nitro/
