@@ -1,4 +1,4 @@
-import { Tool, Injectable } from '@nitrostack/core';
+import { ToolDecorator as Tool , Injectable } from '@nitrostack/core';
 
 @Injectable()
 export class LoanDecisionTool {

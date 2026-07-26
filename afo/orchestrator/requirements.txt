@@ -13,3 +13,4 @@ httpx
 pytest
 pandas
 typing_extensions
+mcp<2

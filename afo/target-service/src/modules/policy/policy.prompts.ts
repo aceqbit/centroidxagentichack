@@ -1,4 +1,4 @@
-import { Prompt, Injectable } from '@nitrostack/core';
+import { PromptDecorator as Prompt , Injectable } from '@nitrostack/core';
 import { PolicyService } from './policy.service.js';
 
 @Injectable()

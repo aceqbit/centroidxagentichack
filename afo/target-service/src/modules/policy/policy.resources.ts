@@ -1,4 +1,4 @@
-import { Resource, Injectable } from '@nitrostack/core';
+import { ResourceDecorator as Resource , Injectable } from '@nitrostack/core';
 import { PolicyService } from './policy.service.js';
 
 @Injectable()
