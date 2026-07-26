@@ -1,6 +1,7 @@
 import { defineNitroConfig } from 'nitropack/config'
 
 export default defineNitroConfig({
+  compatibilityDate: '2024-04-03',
   srcDir: 'src',
   routesDir: 'routes',
   port: 3002,
@@ -12,4 +13,6 @@ export default defineNitroConfig({
   typescript: {
     strict: true,
   },
+  // Exclude test files — Nitro picks up all .ts files in src/ otherwise
+  ignore: ['**/*.test.ts', '**/*.spec.ts'],
 })
