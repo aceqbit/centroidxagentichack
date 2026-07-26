@@ -2,7 +2,7 @@ import { defineNitroConfig } from 'nitropack/config'
 
 export default defineNitroConfig({
   srcDir: 'src',
-  routesDir: 'src/routes',
+  routesDir: 'routes',
   port: 3002,
   runtimeConfig: {
     databaseUrl: process.env.DATABASE_URL || '',

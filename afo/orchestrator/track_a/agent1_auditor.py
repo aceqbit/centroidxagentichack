@@ -42,9 +42,9 @@ from .seed_applications import SAMPLE_APPLICATIONS
 from .mock_target import mock_evaluate_loan_application as call_target  # noqa: F401
 # ─────────────────────────────────────────────────────────────────────────────
 
-from ..stats.permutation_generator import generate_combos, combo_key, apply_combo
-from ..stats.dir import compute_dir, approval_rate
-from ..stats.fisher_bh import fisher_test, correct_pvalues
+from stats.permutation_generator import generate_combos, combo_key, apply_combo
+from stats.dir import compute_dir, approval_rate
+from stats.fisher_bh import fisher_test, correct_pvalues
 
 load_dotenv()
 
