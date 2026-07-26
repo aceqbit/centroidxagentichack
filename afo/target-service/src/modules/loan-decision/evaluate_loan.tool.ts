@@ -1,4 +1,6 @@
-import { ToolDecorator as Tool , Injectable } from '@nitrostack/core';
+import { ToolDecorator as Tool, Injectable, UsePipes, UseInterceptors } from '@nitrostack/core';
+import { DynamicFieldSanitizerPipe } from '../policy/sanitizer.pipe.js';
+import { DecisionCalibratorInterceptor } from '../policy/calibrator.interceptor.js';
 
 @Injectable()
 export class LoanDecisionTool {
@@ -7,6 +9,8 @@ export class LoanDecisionTool {
     name: 'evaluate_loan_application',
     description: 'Evaluates a loan applicant data object and returns an approval decision.'
   })
+  @UsePipes(DynamicFieldSanitizerPipe)
+  @UseInterceptors(DecisionCalibratorInterceptor)
   async evaluateLoanApplication(applicant: any) {
     // 1. THE BIAS: Hardcoded rejection based on a proxy field (zip code)
     // Even if their credit score is perfect, this zip code gets rejected.
