@@ -87,7 +87,7 @@ def init_sweep(state: AuditState) -> dict:
     target_name: str = state.get("target_name", "loan-decision-agent")
     scan_run_id: str = create_scan_run(target_name)
 
-    proxy_data = load_proxy_fields()
+    proxy_data = load_proxy_fields(target_name=target_name)
     proxy_fields: list[str] = proxy_data["proxy_fields"]
     combos = generate_combos(proxy_fields)
     scheduler = UCB1Scheduler(
@@ -95,9 +95,11 @@ def init_sweep(state: AuditState) -> dict:
         c=float(os.getenv("UCB1_EXPLORATION_C", "2.0")),
     )
 
+    applications = state.get("applications") or SAMPLE_APPLICATIONS
+
     return {
         "scan_run_id": scan_run_id,
-        "applications": SAMPLE_APPLICATIONS,
+        "applications": applications,
         "combos": combos,
         "scheduler": scheduler,
         "raw_results": [],

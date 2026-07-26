@@ -238,6 +238,14 @@ export default defineEventHandler(() => {
     </div>
 
     <div class="cards-grid">
+      <a class="card" href="/prove-it">
+        <div>
+          <div class="card-title" style="color:var(--aurora-cyan);">⚡ Prove It Live</div>
+          <div class="card-desc">Interactive console for judges to test single-field toggles, animate charts, and generate explanations.</div>
+        </div>
+        <div class="card-link">Launch Live Console →</div>
+      </a>
+
       <a class="card" href="/widgets/bias-heatmap/index.html">
         <div>
           <div class="card-title">Bias Heatmap</div>
