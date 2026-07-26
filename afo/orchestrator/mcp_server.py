@@ -4,7 +4,8 @@ from mcp.server.fastmcp import FastMCP
 from track_a.agent1_auditor import build_graph as build_audit_graph
 from graph.agent2_synthesizer import synthesize_policy
 from graph.agent3_verifier import verify_fix
-from db.repo import get_findings, get_active_policy, get_policy_history, get_ci_gate_result
+from db.repo import get_findings, get_active_policy, get_policy_history
+from gate import compute_ci_gate
 
 mcp = FastMCP("afo-orchestrator")
 
@@ -24,7 +25,8 @@ def verify_patch(scan_run_id: str) -> dict:
 
 @mcp.tool()
 def run_ci_gate(scan_run_id: str) -> dict:
-    return get_ci_gate_result(scan_run_id)
+    return compute_ci_gate(scan_run_id)
+
 
 @mcp.resource("findings://scan/{scan_run_id}")
 def findings_resource(scan_run_id: str) -> str:
