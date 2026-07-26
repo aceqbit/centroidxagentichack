@@ -6,7 +6,7 @@ import { join } from 'path';
 const execAsync = promisify(exec);
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event).catch(() => ({}));
+  const body = (await readBody(event).catch(() => ({}))) || {};
   const targetName = body.target_name || 'loan-decision-agent';
   const orchestratorDir = join(process.cwd(), '..', 'orchestrator');
 
