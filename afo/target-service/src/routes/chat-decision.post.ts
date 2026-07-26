@@ -11,13 +11,13 @@ const loanTool = new LoanDecisionTool();
 
 // Extract structured applicant fields from natural language chat prompt
 function extractFieldsFromMessage(text: string) {
-  const zipMatch = text.match(/\b\d{5}\b/);
+  const zipMatch = text.match(/zip(?: code)?\s+(\d{5})\b/i) || text.match(/\b\d{5}\b/);
   const creditMatch = text.match(/credit score (?:of )?(\d{3})/i) || text.match(/\b([6-8]\d{2})\b/);
-  const incomeMatch = text.match(/income (?:of )?\$?(\d+[\d,]*)/i) || text.match(/\$?(\d{2,3},?\d{3})\b/);
+  const incomeMatch = text.match(/income (?:is |of )?\$?(\d+[\d,]*)/i) || text.match(/\$(\d{2,3},?\d{3})\b/);
   const nameMatch = text.match(/(?:name is|I am) ([A-Z][a-z]+ [A-Z][a-z]+)/i);
 
-  const zip_code = zipMatch ? zipMatch[0] : '90210';
-  const credit_score = creditMatch ? parseInt(creditMatch[1].replace(',', ''), 10) : 700;
+  const zip_code = zipMatch ? zipMatch[1] || zipMatch[0] : '90210';
+  const credit_score = creditMatch ? parseInt(creditMatch[1], 10) : 700;
   let income = 50000;
   if (incomeMatch) {
     income = parseInt(incomeMatch[1].replace(/,/g, ''), 10);
