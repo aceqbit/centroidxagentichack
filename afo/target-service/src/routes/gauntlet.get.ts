@@ -195,7 +195,41 @@ export default defineEventHandler(() => {
           </div>
         </div>
         <div style="font-size:0.8rem; color:var(--dust); border-t:1px solid var(--panel-border); pt:1rem; margin-top:1rem;">
-          Mitigation: Combined Territory & Vehicle Redaction (Zero Redeploy)
+          Mitigation: Combined Territory &amp; Vehicle Redaction (Zero Redeploy)
+        </div>
+      </div>
+
+      <!-- Agent 4 — Real-World Data -->
+      <div class="agent-card" style="border-color:rgba(34,211,238,0.3); background:linear-gradient(135deg,rgba(34,211,238,0.04) 0%,rgba(18,20,43,1) 60%);">
+        <div>
+          <div class="agent-name">Income Eligibility Agent <span style="font-size:0.65rem; color:var(--aurora-cyan); font-family:var(--font-mono); margin-left:0.5rem; vertical-align:middle; background:rgba(34,211,238,0.12); padding:0.1rem 0.4rem; border-radius:4px;">REAL DATA</span></div>
+          <div class="domain-tag">Domain: Income Tier Evaluation | UCI Adult Census (48,842 real records)</div>
+
+          <div class="metric-box">
+            <div>
+              <div class="metric-label">Flagged Proxy Field</div>
+              <div style="font-family:var(--font-mono); color:var(--nebula-magenta);">sex</div>
+            </div>
+            <span class="badge fail">Biased Baseline</span>
+          </div>
+
+          <div class="metric-box">
+            <div>
+              <div class="metric-label">Real-World DIR (Before → After)</div>
+              <div class="metric-value" style="color:var(--aurora-cyan);">0.36 → 0.87</div>
+            </div>
+            <span class="badge pass">PASS (0.87)</span>
+          </div>
+
+          <div style="background:rgba(5,5,10,0.5); border-radius:0.5rem; padding:0.65rem 0.85rem; margin-top:0.75rem;">
+            <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--dust); margin-bottom:0.25rem;">REAL DATA — UCI Adult Census</div>
+            <div style="font-family:var(--font-mono); font-size:0.8rem;">Male &gt;$50k: 30.4% &nbsp;&nbsp;|&nbsp;&nbsp; Female &gt;$50k: 10.9%</div>
+            <div style="font-family:var(--font-mono); font-size:0.78rem; color:var(--supernova-red); margin-top:0.25rem;">DIR: 0.3597 (far below 0.80 threshold)</div>
+          </div>
+        </div>
+        <div style="font-size:0.75rem; color:var(--dust); border-t:1px solid var(--panel-border); margin-top:1rem; padding-top:0.75rem; line-height:1.5;">
+          Seeded from 15 real Census rows. Mitigation: Dynamic Sex-Field Redaction (Zero Redeploy)<br>
+          <span style="font-size:0.65rem; opacity:0.6;">Source: Becker &amp; Kohavi (1996). https://doi.org/10.24432/C5XW20</span>
         </div>
       </div>
     </div>

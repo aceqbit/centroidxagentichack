@@ -14,4 +14,5 @@ pytest
 pandas
 typing_extensions
 groq
+ucimlrepo
 

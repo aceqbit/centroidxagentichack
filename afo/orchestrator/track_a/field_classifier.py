@@ -7,6 +7,7 @@ TARGET_CONFIG = {
     "loan-decision-agent": BASE_DIR / "target-service" / "config" / "proxy_fields.json",
     "resume-screening-agent": BASE_DIR / "target-service" / "config" / "proxy_fields_resume.json",
     "insurance-quote-agent": BASE_DIR / "target-service" / "config" / "proxy_fields_insurance.json",
+    "income-eligibility-agent": BASE_DIR / "target-service" / "config" / "proxy_fields_income_eligibility.json",
 }
 
 DEFAULT_PATH = BASE_DIR / "target-service" / "config" / "proxy_fields.json"
