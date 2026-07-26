@@ -1,13 +1,10 @@
 import { defineEventHandler, readBody } from 'h3';
-import { Groq } from 'groq-sdk';
 import pg from 'pg';
 
 const { Pool } = pg;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:afo@localhost:5432/afo',
 });
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export default defineEventHandler(async (event) => {
   const body = (await readBody(event).catch(() => ({}))) || {};
@@ -26,22 +23,33 @@ export default defineEventHandler(async (event) => {
     // 2. Construct explain_finding prompt
     const promptText = `Explain, in plain English for a non-technical judge, why the combo \`${finding.combo_key}\` in scan \`${scanRunId}\` was flagged as biased, referencing the Disparate Impact Ratio (${finding.dir_value}) and the Benjamini-Hochberg-adjusted p-value (${finding.fdr_adjusted_p}) on record for it.`;
 
-    // 3. Call Groq LLM (llama-3.3-70b-versatile)
-    if (process.env.GROQ_API_KEY) {
-      const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: 'You are an AI fairness auditor explaining statistical bias findings to non-technical hackathon judges clearly and concisely in 2-3 sentences.' },
-          { role: 'user', content: promptText }
-        ],
-        temperature: 0.2
+    // 3. Call Groq HTTP API directly via fetch
+    const apiKey = process.env.GROQ_API_KEY;
+    if (apiKey) {
+      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: 'You are an AI fairness auditor explaining statistical bias findings to non-technical hackathon judges clearly and concisely in 2-3 sentences.' },
+            { role: 'user', content: promptText }
+          ],
+          temperature: 0.2
+        })
       });
 
-      const explanation = completion.choices[0]?.message?.content || '';
-      return { status: 'ok', scan_run_id: scanRunId, combo_key: comboKey, prompt: promptText, explanation };
+      if (resp.ok) {
+        const data = (await resp.json()) as any;
+        const explanation = data.choices?.[0]?.message?.content || '';
+        return { status: 'ok', scan_run_id: scanRunId, combo_key: comboKey, prompt: promptText, explanation };
+      }
     }
 
-    // Fallback if GROQ_API_KEY not present
+    // Fallback response if Groq API call fails or key is missing
     return {
       status: 'ok',
       scan_run_id: scanRunId,
