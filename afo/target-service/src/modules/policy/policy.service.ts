@@ -37,10 +37,10 @@ export class PolicyService {
       if (rows.length === 0) {
         // No policy row yet (pre-Agent-2 run) — return a no-op default.
         return {
-          redact_fields: ['zip_code'],
+          redact_fields: [],
           neutral_value: 'REDACTED',
           group_adjustments: {},
-          rationale: 'Default fallback — no active policy in DB yet.',
+          rationale: 'Default baseline — no active mitigation policy in DB.',
         };
       }
       const row = rows[0];
@@ -55,7 +55,7 @@ export class PolicyService {
     } catch {
       // DB not yet reachable (early dev) — return safe fallback.
       return {
-        redact_fields: ['zip_code'],
+        redact_fields: [],
         neutral_value: 'REDACTED',
         group_adjustments: {},
         rationale: 'DB unavailable — using fallback policy.',
