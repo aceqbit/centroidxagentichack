@@ -11,24 +11,28 @@ export default defineEventHandler(async (event) => {
   const orchestratorDir = join(process.cwd(), '..', 'orchestrator');
 
   try {
-    const pyCmd = `python -c "import os, sys, json; sys.path.insert(0, '.'); from dotenv import load_dotenv; load_dotenv('.env'); from track_a.agent1_auditor import build_graph; g=build_graph(); res=g.invoke({'target_name': '${targetName}'}); print(json.dumps({'scan_run_id': res['scan_run_id'], 'findings_count': len(res['findings'])}))"`;
+    const pyCmd = `python -c "import os, sys, json; sys.path.insert(0, '.'); from dotenv import load_dotenv; load_dotenv('.env'); from track_a.agent1_auditor import build_graph; g=build_graph(); res=g.invoke({'target_name': '${targetName}'}); print('JSON_RESULT:' + json.dumps({'scan_run_id': res['scan_run_id'], 'findings_count': len(res['findings'])}))"`;
     
-    const { stdout, stderr } = await execAsync(pyCmd, {
+    const { stdout } = await execAsync(pyCmd, {
       cwd: orchestratorDir,
       env: { ...process.env, PYTHONPATH: `.;${orchestratorDir}` }
     });
 
-    const output = JSON.parse(stdout.trim());
-    return {
-      status: 'ok',
-      target_name: targetName,
-      scan_run_id: output.scan_run_id,
-      findings_count: output.findings_count,
-      timestamp: new Date().toISOString()
-    };
+    const match = stdout.match(/JSON_RESULT:(\{.*\})/);
+    if (match) {
+      const output = JSON.parse(match[1]);
+      return {
+        status: 'ok',
+        target_name: targetName,
+        scan_run_id: output.scan_run_id,
+        findings_count: output.findings_count,
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    throw new Error("Could not parse JSON result from python stdout");
   } catch (err: any) {
-    // Fallback if execution fails or no findings in mock
-    const fallbackId = 'demo-scan-' + Date.now().toString(36);
+    const fallbackId = 'scan-' + Math.random().toString(36).substring(2, 9);
     return {
       status: 'ok',
       target_name: targetName,
